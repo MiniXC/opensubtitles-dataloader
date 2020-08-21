@@ -51,5 +51,5 @@ pytorch.
 ````python
 from torch.utils.data import DataLoader
 train, valid, text = OpenSubtitlesDataset('en').splits()
-train_loader = DataLoader(train, batch_size=kwargs['batch_size'])
+train_loader = DataLoader(train, batch_size=16)
 ````

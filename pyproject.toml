@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "opensubtitles-dataloader"
+version = "0.1.3"
+description = ""
+authors = ["Christoph Minixhofer <christoph.minixhofer@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.5"
+tqdm = "^4.0"
+torch = "^1.0"
+numpy = "^1.0"
+click = "^7.1.2"
+
+[tool.poetry.dev-dependencies]
+pytest = "^3.0"
+
+[tool.poetry.scripts]
+"opensubtitles-download" = 'opensubtitles_dataloader.__main__:download'
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"

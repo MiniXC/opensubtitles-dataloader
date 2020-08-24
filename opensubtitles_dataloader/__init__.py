@@ -8,6 +8,10 @@ import mmap
 from collections import deque
 import numpy as np
 import torch
+from pathlib import Path
+import math
+from warnings import warn
+import textwrap
 
 
 class OpenSubtitlesDataset(Dataset):
@@ -17,28 +21,45 @@ class OpenSubtitlesDataset(Dataset):
     def __init__(
         self,
         language,
+        n_sents=1,
+        delimiter=" ",
         npy_arrays=None,
-        root_dir="~/.cache/opensubtitles",
+        root_dir=f"{Path.home()}/.cache/opensubtitles",
         overwrite=False,
         preprocess_function=None,
         first_n_lines=float("inf"),
         update_bar_every=10_000,
-        n_sents=1,
-        alt_len=True,
     ):
-        self.n_sents = n_sents
-        self.alt_len = alt_len
+        self.alt_len = isinstance(n_sents, tuple)
+        if self.alt_len:
+            if (n_sents[1] - n_sents[0]) % 2 == 0:
+                warn(
+                    textwrap.dedent(
+                        f"""\
+                    Given possible sentence lengths are {list(range(n_sents[0], n_sents[1]+1))}. 
+                    Using an odd number of possible sentence lengths will lead to a non-uniform distribution of sentence length.
+                    """
+                    ),
+                    stacklevel=2,
+                )
+            n_sents = n_sents[0], n_sents[1] + n_sents[0]
+            self.n_sents = n_sents[1]
+            self.tuple_n_sents = n_sents
+        else:
+            self.n_sents = n_sents
+        self.delimiter = delimiter
+        preprocessed = False
         if npy_arrays is not None:
             self.slices = npy_arrays[0]
             self.lengths = npy_arrays[1]
         else:
             slices_file = root_dir + "slices.npy"
-            lengths_file = root_dir + "lengths.npy"
+            lengths_file = root_dir + f"lengths_{n_sents}.npy"
             slices = deque()
             offset = 0
             self.update_bar_every = update_bar_every
             self.slices_file = slices_file
-            self.lenghts_file = lengths_file
+            self.lengths_file = lengths_file
             txt_file = f"{root_dir}/{language}/{language}.txt"
             if path.isfile(txt_file + ".pre") and not overwrite:
                 txt_file = txt_file + ".pre"
@@ -53,7 +74,7 @@ class OpenSubtitlesDataset(Dataset):
                                 mininterval=5,
                             )
                         ):
-                            if i >= first_n_lines - 1:
+                            if i >= first_n_lines:
                                 break
                             pre_text = preprocess_function(text.decode("utf-8"))
                             if pre_text is not None:
@@ -65,12 +86,17 @@ class OpenSubtitlesDataset(Dataset):
                 txt_file = txt_file + ".pre"
                 preprocessed = True
                 self._convert_deque_to_npy(slices)
-            if not path.isfile(slices_file) and not overwrite and ".pre" in txt_file:
+            if (
+                not path.isfile(slices_file)
+                and path.isfile(lengths_file)
+                and not overwrite
+                and ".pre" in txt_file
+            ):
                 raise Exception(
-                    "preprocessed file exists, but slices and lenghts do not",
+                    "preprocessed file exists, but slices and lengths do not",
                     "try preprocessing again",
                 )
-            if path.isfile(slices_file) and not overwrite:
+            if path.isfile(slices_file) and path.isfile(lengths_file) and not overwrite:
                 self.slices = np.load(slices_file)
                 self.lengths = np.load(lengths_file)
                 if first_n_lines * self.n_sents < len(self.slices):
@@ -87,7 +113,7 @@ class OpenSubtitlesDataset(Dataset):
                             mininterval=5,
                         )
                     ):
-                        if i >= first_n_lines - 1:
+                        if i >= first_n_lines:
                             break
                         slices.append(offset)
                         offset += len(text)
@@ -130,19 +156,20 @@ class OpenSubtitlesDataset(Dataset):
             del slices
             pbar.update(i % self.update_bar_every)
             pbar.close()
-        np.save(self.lenghts_file, self.lengths)
-        np.save(self.slices_file, self.slices)
         self._reshape_npy()
+        np.save(self.lengths_file, self.lengths)
+        np.save(self.slices_file, self.slices)
 
     def __len__(self):
         if self.alt_len and self.n_sents > 1:
-            return len(self.slices) * 2
+            return len(self.lengths) * 2
         else:
-            return len(self.slices)
+            return len(self.lengths)
 
     def __getitem__(self, idx):
         orig_idx = idx
-        idx = idx // 2
+        if self.alt_len:
+            idx = idx // 2
         start = self.slices[idx]
         end = start + self.lengths[idx].sum() - self.trim_linebreak
         result = self.mm[int(start) : int(end)]
@@ -151,57 +178,29 @@ class OpenSubtitlesDataset(Dataset):
             for l in self.lengths[idx].cumsum()[:-1] + shift_arr:
                 result = OpenSubtitlesDataset._insert_blank(result, int(l))
         elif self.alt_len:
-            mod = idx % (self.n_sents - 1)
+            mod_arr = np.arange(self.tuple_n_sents[0], self.tuple_n_sents[1] - 1) - 1
+            mod_len = len(mod_arr) // 2
+            if mod_arr[mod_len] % 2 == 0:
+                mod_len += 1
+            mod_arr = mod_arr[:mod_len]
+            mod = idx % len(mod_arr)
+            mod = mod_arr[mod]
             offset_arr = self.lengths[idx].cumsum()[:-1]
             result1 = self.mm[int(start) : int(start + offset_arr[mod])]
-            length1 = self.lengths[idx][: mod + 1].sum()
+            length1 = self.lengths[idx][:mod].sum()
             result2 = self.mm[int(start + offset_arr[mod]) : int(end)]
-            length2 = self.lengths[idx][mod + 1 :].sum()
-            for i, l in enumerate(offset_arr):
-                if i < mod:
-                    result1 = OpenSubtitlesDataset._insert_blank(
-                        result1, int(l + shift_arr[i])
-                    )
-                elif i > mod:
-                    result2 = OpenSubtitlesDataset._insert_blank(
-                        result2, int(l + shift_arr[i - mod - 1] - offset_arr[mod])
-                    )
+            length2 = self.lengths[idx][mod:].sum()
             if orig_idx % 2 == 0:
-                return result1.decode("utf-8"), length1
+                return result1.decode("utf-8").replace("\n", self.delimiter)
             else:
-                return result2.decode("utf-8"), length2
-        return result.decode("utf-8"), self.lengths[idx].sum()
+                return result2.decode("utf-8").replace("\n", self.delimiter)
+        return result.decode("utf-8").replace("\n", self.delimiter)
 
-    def _get_alt_lens(self):
-        self_len = len(self.lengths)
-        odd_tiles = np.tile(
-            np.tril(np.ones((self.n_sents, self.n_sents)), -1)[:, :-1],
-            self_len // (self.n_sents - 1) + 1,
-        ).T[:self_len]
-        even_tiles = np.tile(
-            np.triu(np.ones((self.n_sents, self.n_sents)), 1)[:, 1:],
-            self_len // (self.n_sents - 1) + 1,
-        ).T[:self_len]
-        even_lens = (even_tiles * self.lengths).sum(axis=1)
-        odd_lens = (odd_tiles * self.lengths).sum(axis=1)
-        return np.ravel(np.column_stack((even_lens, odd_lens)))
-
-    def splits(self,  split=[0.7, 0.15, 0.15], seed=None, sort_by_len=True):
+    def splits(self, split=[0.7, 0.15, 0.15], seed=None):
         if seed is not None:
             torch.manual_seed(seed)
         lens = [int(len(self) * s) for s in split]
         missing = len(self) - np.sum(lens)
         lens[np.argmax(split)] += int(missing)
         rand_splits = []
-        if not sort_by_len:
-            return random_split(self, lens)
-        for split in random_split(self, lens):
-            ind = np.array(split.indices)
-            if self.alt_len and self.n_sents > 1:
-                lengths = self._get_alt_lens()[ind]
-            else:
-                lengths = self.lengths[ind].sum(axis=1)
-            lengthsort = lengths.argsort()
-            split.indices = list(ind[lengthsort])
-            rand_splits.append(split)
-        return rand_splits
+        return random_split(self, lens)

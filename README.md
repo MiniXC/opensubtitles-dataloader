@@ -7,6 +7,10 @@ See possible languages [here](http://opus.nlpl.eu/OpenSubtitles-v2018.php).
 ````bash
 opensubtitles-download en
 ````
+Load tokenized version.
+````bash
+opensubtitles-download en --token
+````
 
 ## Use in Python
 ### Load
@@ -19,7 +23,15 @@ opensubtites_dataset = OpenSubtitlesDataset('en', first_n_lines=1_000_000)
 ````
 Group sentences into groups of 5.
 ````python
-opensubtites_dataset = OpenSubtitlesDataset('en', n_sents=5)
+opensubtites_dataset = OpenSubtitlesDataset('en', 5)
+````
+Group sentences into groups ranging from 2 to 5.
+````python
+opensubtites_dataset = OpenSubtitlesDataset('en', (2,5))
+````
+Split sentences using "\n".
+````python
+opensubtites_dataset = OpenSubtitlesDataset('en', delimiter="\n")
 ````
 Do preprocessing.
 ````python
@@ -36,10 +48,6 @@ train, valid, test = opensubtites_dataset.split([0.7, 0.15, 0.15])
 Use a seed.
 ````python
 train, valid, test = opensubtites_dataset.split(seed=42)
-````
-Per default, the entries in splits are sorted by length to make batching easier, this can be turned off.
-````python
-train, valid, test = opensubtites_dataset.split(sort_by_len=False)
 ````
 ### Access
 index.

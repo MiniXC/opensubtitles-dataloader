@@ -1,4 +1,4 @@
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 from torch.utils.data import Dataset, random_split
 from tqdm.auto import tqdm

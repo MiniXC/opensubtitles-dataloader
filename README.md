@@ -1,5 +1,8 @@
 # opensubtitles-dataloader
 [![PyPI version](https://badge.fury.io/py/opensubtitles-dataloader.svg)](https://badge.fury.io/py/opensubtitles-dataloader)
+````
+pip install opensubtitles-dataloader
+````
 
 Download, preprocess and use sentences from the [OpenSubtitles v2018 dataset](http://opus.nlpl.eu/OpenSubtitles-v2018.php) without ever needing to load all of it into memory.
 
